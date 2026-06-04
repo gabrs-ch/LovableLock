@@ -1,6 +1,6 @@
 # LovableLock 💞
 
-Diário financeiro de duas contas. Cada um tem seu próprio saldo, mas as despesas, metas e o cálculo de **quem deve a quem** ficam compartilhados.
+Diário financeiro de duas contas para o casal se organizar. Cada um mantém seu próprio saldo, e as despesas e metas ficam compartilhadas em um só lugar.
 
 ## Stack
 
@@ -55,7 +55,7 @@ npm run dev
 3. **Abra outra janela anônima** (ou outro navegador) e cadastre a conta B.
 4. Na conta A, vá em **Parear** → clique em **Gerar código** → copie os 6 caracteres.
 5. Na conta B, vá em **Parear** → cole o código em **Tenho um código** → **Parear contas**.
-6. As duas contas agora compartilham lançamentos, metas e o veredicto de quem deve a quem.
+6. As duas contas agora compartilham lançamentos, metas e o resumo das despesas.
 
 ## Funcionalidades
 
@@ -63,9 +63,9 @@ npm run dev
 2. Pareamento entre 2 contas via código
 3. Saldo de caixa individual ("quanto tenho em dinheiro/conta")
 4. Lançamentos: descrição, valor, categoria, pagador, divisão (50/50, só pagante, custom %)
-5. Acerto de contas com cálculo automático de quem deve a quem
+5. Acerto de contas para registrar pagamentos entre os dois
 6. Metas conjuntas com barra de progresso, prazo e emoji
-7. Dashboard com soma dos caixas, quem deve a quem, gastos do mês por categoria, últimas transações e metas
+7. Dashboard com soma dos caixas, gastos do mês por categoria, últimas transações e metas
 
 ## Estrutura
 

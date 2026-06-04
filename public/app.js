@@ -302,15 +302,15 @@ route('dash', async () => {
 
   const owes = (() => {
     const n = d.net_to_me;
-    if (Math.abs(n) < 0.5) return `<div class="even">contas <em>quitadas</em> · vocês estão em paz ✦</div>`;
+    if (Math.abs(n) < 0.5) return `<div class="even">as contas do mês estão <em>equilibradas</em> ✦</div>`;
     if (n > 0) return `
-      <div class="verdict"><em>${esc(d.partner.name)}</em> deve a você</div>
+      <div class="verdict"><em>${esc(d.partner.name)}</em> contribuiu menos no período</div>
       <div class="amount">${BRL(n)}</div>
-      <div class="actions"><button class="btn btn-sm" id="ask-settle">registrar acerto</button></div>`;
+      <div class="actions"><button class="btn btn-sm" id="ask-settle">registrar ajuste</button></div>`;
     return `
-      <div class="verdict">Você deve a <em>${esc(d.partner.name)}</em></div>
+      <div class="verdict">você contribuiu menos que <em>${esc(d.partner.name)}</em></div>
       <div class="amount">${BRL(Math.abs(n))}</div>
-      <div class="actions"><button class="btn btn-sm" id="do-settle">pagar agora</button></div>`;
+      <div class="actions"><button class="btn btn-sm" id="do-settle">registrar ajuste</button></div>`;
   })();
 
   const initials = (state.user.name?.[0] || '?') + (d.partner?.name?.[0] || '?');
@@ -384,7 +384,7 @@ route('dash', async () => {
         </div>
       </div>
       <div class="who-owes">
-        <div class="title">⟜ acerto de contas</div>
+        <div class="title">⟜ saldo entre vocês</div>
         ${owes}
       </div>
     </div>
@@ -708,8 +708,8 @@ function openBalanceModal(current) {
 function openSettleModal(netToMe, partner) {
   const owedByMe = netToMe < 0 ? Math.abs(netToMe) : 0;
   const m = openModal(`
-    <h2>Acerto de <em class="display">contas</em></h2>
-    <p class="muted" style="margin-bottom:14px;">Registre o pagamento entre vocês — o caixa de quem pagou diminui, e o do outro aumenta.</p>
+    <h2>Registrar <em class="display">ajuste</em></h2>
+    <p class="muted" style="margin-bottom:14px;">Use quando um de vocês passou um valor ao outro para equilibrar as contribuições — o caixa de quem transferiu diminui, e o do outro aumenta.</p>
     <form id="set-form">
       <div class="row-2">
         <div class="field">
@@ -723,12 +723,12 @@ function openSettleModal(netToMe, partner) {
       </div>
       <div class="field">
         <label>Nota (opcional)</label>
-        <input name="note" maxlength="200" placeholder="acerto de outubro…" />
+        <input name="note" maxlength="200" placeholder="ajuste de outubro…" />
       </div>
       <div id="set-err"></div>
       <div class="actions">
         <button class="btn btn-ghost" type="button" data-close>cancelar</button>
-        <button class="btn">registrar acerto</button>
+        <button class="btn">registrar</button>
       </div>
     </form>
   `);
