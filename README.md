@@ -11,13 +11,20 @@ Diário financeiro de duas contas para o casal se organizar. Cada um mantém seu
 
 ## Pré-requisitos
 
-- **Node.js >= 18.17** (testado em 20.x)
+- **Node.js >= 18.17** (testado em 20.x e 24.x)
 - **npm** (vem com o Node)
-- **Compilador C** para o `better-sqlite3` (compilação nativa):
-  - **Debian/Ubuntu/Kali:** `sudo apt install -y build-essential python3`
-  - **Fedora/RHEL:** `sudo dnf install -y gcc-c++ make python3`
-  - **macOS:** `xcode-select --install`
-  - **Windows:** `npm install --global windows-build-tools` (PowerShell admin)
+- **OpenSSL** para gerar o `JWT_SECRET` — já vem em Linux/macOS; no Windows use o Git Bash, WSL, ou troque por `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+
+### Quando precisa de compilador C
+
+Em arquiteturas comuns (Linux x64/ARM64, macOS Intel/Apple Silicon, Windows x64) com Node em uma versão LTS recente, o `npm install` baixa binários pré-compilados de `bcrypt` e `better-sqlite3` e **não compila nada**.
+
+Se o `npm install` cair no fallback de compilação (mensagem com `node-gyp`, `gcc` ou `c++`), instale o toolchain do seu SO:
+
+- **Debian/Ubuntu/Kali:** `sudo apt install -y build-essential python3`
+- **Fedora/RHEL:** `sudo dnf install -y gcc-c++ make python3`
+- **macOS:** `xcode-select --install`
+- **Windows:** instale [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) com o workload "Desktop development with C++" e [Python 3](https://www.python.org/downloads/)
 
 ## Instalação local
 
