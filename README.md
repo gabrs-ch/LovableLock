@@ -1,6 +1,6 @@
 # LovableLock 💞
 
-Caderno-razão íntimo de duas contas. Controle financeiro a dois — saldos individuais, despesas compartilhadas, metas conjuntas, e o veredicto sereno de **quem deve a quem**.
+Diário financeiro de duas contas. Cada um tem seu próprio saldo, mas as despesas, metas e o cálculo de **quem deve a quem** ficam compartilhados.
 
 ## Stack
 
@@ -65,7 +65,7 @@ npm run dev
 4. Lançamentos: descrição, valor, categoria, pagador, divisão (50/50, só pagante, custom %)
 5. Acerto de contas com cálculo automático de quem deve a quem
 6. Metas conjuntas com barra de progresso, prazo e emoji
-7. Dashboard editorial: pool, veredicto, gastos do mês por categoria, últimas transações, metas
+7. Dashboard com soma dos caixas, quem deve a quem, gastos do mês por categoria, últimas transações e metas
 
 ## Estrutura
 
@@ -79,7 +79,7 @@ LovableLock/
 │   └── finance.js     — /api/transactions, /api/goals, /api/settlements, /api/dashboard
 ├── public/
 │   ├── index.html
-│   ├── styles.css     — paleta editorial (bordeaux/ouro queimado/creme)
+│   ├── styles.css     — estilos (paleta bordeaux/ouro/creme)
 │   └── app.js         — SPA com hash router
 └── db/lovablelock.sqlite  (criado no 1º boot)
 ```
