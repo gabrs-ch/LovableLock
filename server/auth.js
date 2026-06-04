@@ -1,11 +1,13 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import db from './db.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me-please';
+const JWT_SECRET = process.env.JWT_SECRET;
 const COOKIE_NAME = 'll_token';
 const TOKEN_TTL = '7d';
+const IS_PROD = process.env.NODE_ENV === 'production';
 
 // Senha forte: >=8, 1 maiúscula, 1 minúscula, 1 dígito, 1 especial
 const strongPassword = z.string()
@@ -24,20 +26,41 @@ const registerSchema = z.object({
 
 const loginSchema = z.object({
   email: z.string().email().transform(s => s.trim().toLowerCase()),
-  password: z.string().min(1),
+  password: z.string().min(1).max(128),
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos cadastros a partir deste IP. Tente novamente mais tarde.' },
 });
 
 function signToken(userId) {
   return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
 
-function setAuthCookie(res, token) {
-  res.cookie(COOKIE_NAME, token, {
+function cookieOptions() {
+  return {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    secure: IS_PROD,
+    path: '/',
     maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  };
+}
+
+function setAuthCookie(res, token) {
+  res.cookie(COOKIE_NAME, token, cookieOptions());
 }
 
 export function requireAuth(req, res, next) {
@@ -45,7 +68,9 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Não autenticado' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = db.prepare('SELECT id, email, name, cash_balance, couple_id FROM users WHERE id = ?').get(payload.uid);
+    const user = db.prepare(
+      'SELECT id, email, name, cash_balance, couple_id FROM users WHERE id = ?'
+    ).get(payload.uid);
     if (!user) return res.status(401).json({ error: 'Sessão inválida' });
     req.user = user;
     next();
@@ -55,7 +80,7 @@ export function requireAuth(req, res, next) {
 }
 
 export function registerAuthRoutes(app) {
-  app.post('/api/auth/register', async (req, res) => {
+  app.post('/api/auth/register', registerLimiter, async (req, res) => {
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -65,18 +90,26 @@ export function registerAuthRoutes(app) {
     if (existing) return res.status(409).json({ error: 'Email já cadastrado' });
 
     const hash = await bcrypt.hash(password, 12);
-    const info = db.prepare('INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)').run(email, hash, name);
+    const info = db.prepare(
+      'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)'
+    ).run(email, hash, name);
     const token = signToken(info.lastInsertRowid);
     setAuthCookie(res, token);
     res.json({ id: info.lastInsertRowid, email, name, couple_id: null });
   });
 
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', loginLimiter, async (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Email e senha obrigatórios' });
     const { email, password } = parsed.data;
-    const row = db.prepare('SELECT id, email, name, password_hash, couple_id FROM users WHERE email = ?').get(email);
-    if (!row) return res.status(401).json({ error: 'Email ou senha incorretos' });
+    const row = db.prepare(
+      'SELECT id, email, name, password_hash, couple_id FROM users WHERE email = ?'
+    ).get(email);
+    if (!row) {
+      // hash dummy para nivelar tempo de resposta — evita user enumeration por timing
+      await bcrypt.compare(password, '$2b$12$abcdefghijklmnopqrstuv0123456789ABCDEFGHIJKLMNOPQRSTUV');
+      return res.status(401).json({ error: 'Email ou senha incorretos' });
+    }
     const ok = await bcrypt.compare(password, row.password_hash);
     if (!ok) return res.status(401).json({ error: 'Email ou senha incorretos' });
     const token = signToken(row.id);
@@ -85,7 +118,7 @@ export function registerAuthRoutes(app) {
   });
 
   app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie(COOKIE_NAME);
+    res.clearCookie(COOKIE_NAME, { path: '/', sameSite: 'strict', secure: IS_PROD, httpOnly: true });
     res.json({ ok: true });
   });
 

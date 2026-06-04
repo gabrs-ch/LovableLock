@@ -1,7 +1,16 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import db from './db.js';
 import { requireAuth } from './auth.js';
+
+const joinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de pareamento. Aguarde alguns minutos.' },
+});
 
 function generateCode() {
   // 6 chars, alfabeto sem caracteres ambíguos (0/O, 1/I/L)
@@ -41,7 +50,7 @@ export function registerCoupleRoutes(app) {
   });
 
   // Aceita um convite e cria o casal
-  app.post('/api/couple/join', requireAuth, (req, res) => {
+  app.post('/api/couple/join', joinLimiter, requireAuth, (req, res) => {
     const parsed = joinSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Código inválido' });
     if (req.user.couple_id) return res.status(400).json({ error: 'Você já está pareado' });
@@ -79,7 +88,7 @@ export function registerCoupleRoutes(app) {
   app.get('/api/couple/me', requireAuth, (req, res) => {
     if (!req.user.couple_id) return res.json({ couple: null, partner: null });
     const couple = db.prepare('SELECT id, nickname, started_at, created_at FROM couples WHERE id = ?').get(req.user.couple_id);
-    const partner = db.prepare('SELECT id, name, email, cash_balance FROM users WHERE couple_id = ? AND id != ?').get(req.user.couple_id, req.user.id);
+    const partner = db.prepare('SELECT id, name, cash_balance FROM users WHERE couple_id = ? AND id != ?').get(req.user.couple_id, req.user.id);
     res.json({ couple, partner });
   });
 

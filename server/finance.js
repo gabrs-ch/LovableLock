@@ -12,6 +12,11 @@ function requireCouple(req, res, next) {
   next();
 }
 
+function parseId(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 && n < 2_147_483_647 ? n : null;
+}
+
 function partnerOf(coupleId, userId) {
   return db.prepare('SELECT id, name FROM users WHERE couple_id = ? AND id != ?').get(coupleId, userId);
 }
@@ -73,19 +78,20 @@ export function registerFinanceRoutes(app) {
     else if (t.split_mode === 'payer') payerShare = 1;
     else if (t.split_mode === 'custom') payerShare = t.payer_share ?? 0.5;
 
-    const info = db.prepare(`
-      INSERT INTO transactions (couple_id, payer_id, amount, description, category, split_mode, payer_share, occurred_on)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.couple_id, payerId, t.amount, t.description, t.category, t.split_mode, payerShare, t.occurred_on);
-
-    // Quem pagou em dinheiro abate do próprio caixa
-    db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(t.amount, payerId);
-
-    res.json({ id: info.lastInsertRowid });
+    const txn = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO transactions (couple_id, payer_id, amount, description, category, split_mode, payer_share, occurred_on)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(req.user.couple_id, payerId, t.amount, t.description, t.category, t.split_mode, payerShare, t.occurred_on);
+      // Quem pagou em dinheiro abate do próprio caixa
+      db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(t.amount, payerId);
+      return info.lastInsertRowid;
+    });
+    res.json({ id: txn() });
   });
 
   app.get('/api/transactions', requireAuth, requireCouple, (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 100, 500));
     const month = req.query.month; // YYYY-MM
     let sql = `
       SELECT t.*, u.name AS payer_name
@@ -103,10 +109,17 @@ export function registerFinanceRoutes(app) {
   });
 
   app.delete('/api/transactions/:id', requireAuth, requireCouple, (req, res) => {
-    const tx = db.prepare('SELECT * FROM transactions WHERE id = ? AND couple_id = ?').get(req.params.id, req.user.couple_id);
-    if (!tx) return res.status(404).json({ error: 'Transação não encontrada' });
-    db.prepare('UPDATE users SET cash_balance = cash_balance + ? WHERE id = ?').run(tx.amount, tx.payer_id);
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido' });
+    const txn = db.transaction(() => {
+      const tx = db.prepare('SELECT * FROM transactions WHERE id = ? AND couple_id = ?').get(id, req.user.couple_id);
+      if (!tx) return null;
+      db.prepare('UPDATE users SET cash_balance = cash_balance + ? WHERE id = ?').run(tx.amount, tx.payer_id);
+      db.prepare('DELETE FROM transactions WHERE id = ?').run(tx.id);
+      return tx;
+    });
+    const result = txn();
+    if (!result) return res.status(404).json({ error: 'Transação não encontrada' });
     res.json({ ok: true });
   });
 
@@ -127,9 +140,11 @@ export function registerFinanceRoutes(app) {
   });
 
   app.post('/api/goals/:id/contribute', requireAuth, requireCouple, (req, res) => {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido' });
     const parsed = goalContribSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-    const goal = db.prepare('SELECT * FROM goals WHERE id = ? AND couple_id = ?').get(req.params.id, req.user.couple_id);
+    const goal = db.prepare('SELECT * FROM goals WHERE id = ? AND couple_id = ?').get(id, req.user.couple_id);
     if (!goal) return res.status(404).json({ error: 'Meta não encontrada' });
     const newAmount = Math.max(0, goal.current_amount + parsed.data.amount);
     db.prepare('UPDATE goals SET current_amount = ? WHERE id = ?').run(newAmount, goal.id);
@@ -137,7 +152,9 @@ export function registerFinanceRoutes(app) {
   });
 
   app.delete('/api/goals/:id', requireAuth, requireCouple, (req, res) => {
-    db.prepare('DELETE FROM goals WHERE id = ? AND couple_id = ?').run(req.params.id, req.user.couple_id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido' });
+    db.prepare('DELETE FROM goals WHERE id = ? AND couple_id = ?').run(id, req.user.couple_id);
     res.json({ ok: true });
   });
 
@@ -149,13 +166,15 @@ export function registerFinanceRoutes(app) {
     const partner = partnerOf(req.user.couple_id, req.user.id);
     if (!partner || partner.id !== s.to_user) return res.status(400).json({ error: 'Destinatário inválido' });
 
-    db.prepare(`
-      INSERT INTO settlements (couple_id, from_user, to_user, amount, note, occurred_on)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.user.couple_id, req.user.id, s.to_user, s.amount, s.note ?? null, s.occurred_on);
-
-    db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(s.amount, req.user.id);
-    db.prepare('UPDATE users SET cash_balance = cash_balance + ? WHERE id = ?').run(s.amount, s.to_user);
+    const txn = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO settlements (couple_id, from_user, to_user, amount, note, occurred_on)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(req.user.couple_id, req.user.id, s.to_user, s.amount, s.note ?? null, s.occurred_on);
+      db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(s.amount, req.user.id);
+      db.prepare('UPDATE users SET cash_balance = cash_balance + ? WHERE id = ?').run(s.amount, s.to_user);
+    });
+    txn();
     res.json({ ok: true });
   });
 
