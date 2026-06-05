@@ -1,5 +1,6 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerAuthRoutes } from './auth.js';
@@ -31,12 +32,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   res.setHeader(
     'Content-Security-Policy',
     [
       "default-src 'self'",
       "script-src 'self'",
-      "style-src 'self' https://fonts.googleapis.com",
+      // 'unsafe-inline' em styles: o app.js usa atributos style="" (barras de progresso etc.)
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data:",
       "connect-src 'self'",
@@ -47,6 +52,15 @@ app.use((req, res, next) => {
   );
   next();
 });
+
+// Rate-limit geral da API (limites mais estritos por rota em auth/couple)
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas requisições. Aguarde alguns minutos.' },
+}));
 
 registerAuthRoutes(app);
 registerCoupleRoutes(app);

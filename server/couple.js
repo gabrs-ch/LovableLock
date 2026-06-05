@@ -12,6 +12,14 @@ const joinLimiter = rateLimit({
   message: { error: 'Muitas tentativas de pareamento. Aguarde alguns minutos.' },
 });
 
+const inviteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos convites gerados. Aguarde alguns minutos.' },
+});
+
 function generateCode() {
   // 6 chars, alfabeto sem caracteres ambíguos (0/O, 1/I/L)
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -32,7 +40,7 @@ const coupleMetaSchema = z.object({
 
 export function registerCoupleRoutes(app) {
   // Gera código de convite para parear
-  app.post('/api/couple/invite', requireAuth, (req, res) => {
+  app.post('/api/couple/invite', inviteLimiter, requireAuth, (req, res) => {
     if (req.user.couple_id) {
       return res.status(400).json({ error: 'Você já está em um casal. Saia antes de convidar outra pessoa.' });
     }

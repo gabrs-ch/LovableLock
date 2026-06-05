@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import db from './db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -37,6 +37,19 @@ const loginLimiter = rateLimit({
   message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
 });
 
+// Limita por conta-alvo (email), não por IP — barra brute-force distribuído contra um usuário
+const loginAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    typeof req.body?.email === 'string'
+      ? `email:${req.body.email.trim().toLowerCase()}`
+      : ipKeyGenerator(req.ip),
+  message: { error: 'Muitas tentativas para esta conta. Tente novamente em alguns minutos.' },
+});
+
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
@@ -67,7 +80,7 @@ export function requireAuth(req, res, next) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return res.status(401).json({ error: 'Não autenticado' });
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     const user = db.prepare(
       'SELECT id, email, name, cash_balance, couple_id FROM users WHERE id = ?'
     ).get(payload.uid);
@@ -98,7 +111,7 @@ export function registerAuthRoutes(app) {
     res.json({ id: info.lastInsertRowid, email, name, couple_id: null });
   });
 
-  app.post('/api/auth/login', loginLimiter, async (req, res) => {
+  app.post('/api/auth/login', loginLimiter, loginAccountLimiter, async (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Email e senha obrigatórios' });
     const { email, password } = parsed.data;

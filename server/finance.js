@@ -43,7 +43,7 @@ const goalSchema = z.object({
 });
 
 const goalContribSchema = z.object({
-  amount: z.number().refine(v => v !== 0, 'Não pode ser zero'),
+  amount: z.number().min(-99999999).max(99999999).refine(v => v !== 0, 'Não pode ser zero'),
 });
 
 const settlementSchema = z.object({
@@ -83,8 +83,9 @@ export function registerFinanceRoutes(app) {
         INSERT INTO transactions (couple_id, payer_id, amount, description, category, split_mode, payer_share, occurred_on)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(req.user.couple_id, payerId, t.amount, t.description, t.category, t.split_mode, payerShare, t.occurred_on);
-      // Quem pagou em dinheiro abate do próprio caixa
-      db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(t.amount, payerId);
+      // Débito sem clamp: precisa ser simétrico ao estorno do DELETE,
+      // senão criar/apagar transação geraria dinheiro no caixa
+      db.prepare('UPDATE users SET cash_balance = cash_balance - ? WHERE id = ?').run(t.amount, payerId);
       return info.lastInsertRowid;
     });
     res.json({ id: txn() });
@@ -146,7 +147,7 @@ export function registerFinanceRoutes(app) {
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
     const goal = db.prepare('SELECT * FROM goals WHERE id = ? AND couple_id = ?').get(id, req.user.couple_id);
     if (!goal) return res.status(404).json({ error: 'Meta não encontrada' });
-    const newAmount = Math.max(0, goal.current_amount + parsed.data.amount);
+    const newAmount = Math.min(99999999, Math.max(0, goal.current_amount + parsed.data.amount));
     db.prepare('UPDATE goals SET current_amount = ? WHERE id = ?').run(newAmount, goal.id);
     res.json({ current_amount: newAmount });
   });
@@ -171,7 +172,8 @@ export function registerFinanceRoutes(app) {
         INSERT INTO settlements (couple_id, from_user, to_user, amount, note, occurred_on)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(req.user.couple_id, req.user.id, s.to_user, s.amount, s.note ?? null, s.occurred_on);
-      db.prepare('UPDATE users SET cash_balance = MAX(0, cash_balance - ?) WHERE id = ?').run(s.amount, req.user.id);
+      // Débito sem clamp: o crédito ao parceiro é integral, então clampar aqui criaria dinheiro
+      db.prepare('UPDATE users SET cash_balance = cash_balance - ? WHERE id = ?').run(s.amount, req.user.id);
       db.prepare('UPDATE users SET cash_balance = cash_balance + ? WHERE id = ?').run(s.amount, s.to_user);
     });
     txn();
