@@ -1,7 +1,6 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
-import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerAuthRoutes } from './auth.js';
 import { registerCoupleRoutes } from './couple.js';
@@ -15,10 +14,6 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
   console.error('  Gere um e exporte: openssl rand -hex 32');
   process.exit(1);
 }
-
-// Garante que o diretório do banco existe
-const dbDir = path.join(__dirname, '..', 'db');
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const app = express();
 app.disable('x-powered-by');

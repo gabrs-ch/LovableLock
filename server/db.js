@@ -1,9 +1,12 @@
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, '..', 'db', 'lovablelock.sqlite');
+const dbDir = path.join(__dirname, '..', 'db');
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+const dbPath = path.join(dbDir, 'lovablelock.sqlite');
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
