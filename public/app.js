@@ -6,6 +6,42 @@ const fmtDate = (iso) => {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}`;
 };
+const fmtDateBR = (iso) => {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+const brToISO = (br) => {
+  const m = String(br).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const [, d, mo, y] = m;
+  const dt = new Date(+y, +mo - 1, +d);
+  if (dt.getFullYear() !== +y || dt.getMonth() !== +mo - 1 || dt.getDate() !== +d) return null;
+  return `${y}-${mo}-${d}`;
+};
+const maskDateBR = (input) => input.addEventListener('input', () => {
+  let v = input.value.replace(/\D/g, '').slice(0, 8);
+  if (v.length > 4) v = `${v.slice(0, 2)}/${v.slice(2, 4)}/${v.slice(4)}`;
+  else if (v.length > 2) v = `${v.slice(0, 2)}/${v.slice(2)}`;
+  input.value = v;
+});
+const timeTogether = (iso) => {
+  const start = new Date(`${iso}T00:00:00`);
+  const now = new Date();
+  if (Number.isNaN(start.getTime()) || start > now) return '';
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if (now.getDate() < start.getDate()) months--;
+  if (months < 0) { years--; months += 12; }
+  const parts = [];
+  if (years > 0) parts.push(`${years} ano${years > 1 ? 's' : ''}`);
+  if (months > 0) parts.push(`${months} ${months > 1 ? 'meses' : 'mês'}`);
+  if (!parts.length) {
+    const days = Math.floor((now - start) / 86400000);
+    parts.push(`${days} dia${days !== 1 ? 's' : ''}`);
+  }
+  return parts.join(' e ');
+};
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const api = async (path, opts = {}) => {
@@ -313,8 +349,6 @@ route('dash', async () => {
       <div class="actions"><button class="btn btn-sm" id="do-settle">registrar ajuste</button></div>`;
   })();
 
-  const initials = (state.user.name?.[0] || '?') + (d.partner?.name?.[0] || '?');
-
   const catBars = d.month.by_category.length
     ? d.month.by_category.map(c => {
         const pct = d.month.total ? Math.round(c.total / d.month.total * 100) : 0;
@@ -344,7 +378,7 @@ route('dash', async () => {
         <div class="goal">
           <div class="emoji">${esc(g.emoji || '✦')}</div>
           <h4>${esc(g.title)}</h4>
-          ${g.deadline ? `<div class="deadline">até ${esc(g.deadline)}</div>` : ''}
+          ${g.deadline ? `<div class="deadline">até ${fmtDateBR(g.deadline)}</div>` : ''}
           <div class="progress"><span style="width:${pct}%"></span></div>
           <div class="nums"><b>${BRL(g.current_amount)}</b><span>${BRL(g.target_amount)} · ${pct}%</span></div>
         </div>`;
@@ -352,23 +386,18 @@ route('dash', async () => {
     : '<div class="empty">Vocês ainda não definiram metas conjuntas. <a href="#/goals">Criar uma</a>.</div>';
 
   $app.innerHTML = shell(`
-    <div class="chapter">
-      <span class="num">I.</span><span class="line"></span><span class="label">Painel do casal</span>
-    </div>
     <div class="split-row" style="margin-bottom: 32px;">
       <div>
         <h1>${esc(d.couple.nickname || `${state.user.name} & ${d.partner.name}`)}</h1>
+        ${d.couple.started_at ? `<p class="muted">juntos desde ${fmtDateBR(d.couple.started_at)}${timeTogether(d.couple.started_at) ? ` · ${timeTogether(d.couple.started_at)} a dois` : ''}</p>` : ''}
         <p class="muted">${d.month.year_month} · um mês a dois</p>
-      </div>
-      <div class="seal-row">
-        <div class="seal">${esc(initials.toUpperCase())}</div>
       </div>
     </div>
 
     <div class="dash-hero">
       <div class="hero-card">
         <div class="label">Soma dos caixas</div>
-        <div class="pool">${BRL(d.pool_total)}<small>BRL</small></div>
+        <div class="pool">${BRL(d.pool_total)}</div>
         <div class="split">
           <div>
             <div class="who">${esc(d.me.name)}</div>
@@ -484,7 +513,7 @@ route('goals', async () => {
       <div class="goal">
         <div class="emoji">${esc(g.emoji || '✦')}</div>
         <h4>${esc(g.title)}</h4>
-        ${g.deadline ? `<div class="deadline">até ${esc(g.deadline)}</div>` : ''}
+        ${g.deadline ? `<div class="deadline">até ${fmtDateBR(g.deadline)}</div>` : ''}
         <div class="progress"><span style="width:${pct}%"></span></div>
         <div class="nums"><b>${BRL(g.current_amount)}</b><span>${BRL(g.target_amount)} · ${pct}%</span></div>
         <div class="actions">
@@ -533,8 +562,8 @@ route('settings', async () => {
           <input name="nickname" value="${esc(c.couple.nickname || '')}" placeholder="ex: A &amp; B" />
         </div>
         <div class="field">
-          <label>Data em que começou</label>
-          <input type="date" name="started_at" value="${esc(c.couple.started_at || '')}" />
+          <label>Data de início do relacionamento</label>
+          <input name="started_at" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" value="${fmtDateBR(c.couple.started_at)}" />
         </div>
         <div class="flex">
           <button class="btn">salvar</button>
@@ -560,10 +589,20 @@ route('settings', async () => {
   $app.querySelector('#edit-balance').addEventListener('click', () => openBalanceModal(me.cash_balance));
   const cf = $app.querySelector('#couple-form');
   if (cf) {
+    maskDateBR(cf.querySelector('[name="started_at"]'));
     cf.addEventListener('submit', async (e) => {
       e.preventDefault();
       const data = Object.fromEntries(new FormData(e.target).entries());
       if (!data.started_at) delete data.started_at;
+      else {
+        const iso = brToISO(data.started_at);
+        if (!iso) {
+          $app.querySelector('#couple-msg').innerHTML = '<div class="alert">Data inválida — use dd/mm/aaaa</div>';
+          return;
+        }
+        data.started_at = iso;
+      }
+      if (!data.nickname) delete data.nickname;
       try {
         await api('/api/couple/me', { method: 'PATCH', body: data });
         $app.querySelector('#couple-msg').innerHTML = '<div class="alert ok">Salvo ✦</div>';
@@ -769,7 +808,7 @@ function openGoalModal() {
         </div>
         <div class="field" style="grid-column:1/3;">
           <label>Prazo (opcional)</label>
-          <input type="date" name="deadline" />
+          <input name="deadline" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" />
         </div>
       </div>
       <div id="g-err"></div>
@@ -780,6 +819,7 @@ function openGoalModal() {
     </form>
   `);
   m.querySelector('[data-close]').addEventListener('click', () => m.remove());
+  maskDateBR(m.querySelector('[name="deadline"]'));
   m.querySelector('#g-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -788,7 +828,14 @@ function openGoalModal() {
       target_amount: parseFloat(fd.get('target_amount')),
       emoji: fd.get('emoji') || undefined,
     };
-    if (fd.get('deadline')) body.deadline = fd.get('deadline');
+    if (fd.get('deadline')) {
+      const iso = brToISO(fd.get('deadline'));
+      if (!iso) {
+        m.querySelector('#g-err').innerHTML = '<div class="alert">Prazo inválido — use dd/mm/aaaa</div>';
+        return;
+      }
+      body.deadline = iso;
+    }
     try {
       await api('/api/goals', { method: 'POST', body });
       m.remove(); navigate();
