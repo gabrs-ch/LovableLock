@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
@@ -58,6 +59,53 @@ const registerLimiter = rateLimit({
   message: { error: 'Muitos cadastros a partir deste IP. Tente novamente mais tarde.' },
 });
 
+// ─── Captcha aritmético stateless: desafio assinado com HMAC, expira em 5 min, uso único ───
+const CAPTCHA_TTL_MS = 5 * 60 * 1000;
+const usedCaptchas = new Map(); // token -> expiresAt, para impedir replay
+
+function pruneUsedCaptchas() {
+  const now = Date.now();
+  for (const [tok, exp] of usedCaptchas) if (exp < now) usedCaptchas.delete(tok);
+}
+
+function generateCaptcha() {
+  const a = crypto.randomInt(1, 10);
+  const b = crypto.randomInt(1, 10);
+  const ops = [
+    { sym: '+', val: a + b },
+    { sym: '×', val: a * b },
+  ];
+  const op = ops[crypto.randomInt(0, ops.length)];
+  const expiresAt = Date.now() + CAPTCHA_TTL_MS;
+  const payload = `${op.val}.${expiresAt}.${crypto.randomBytes(8).toString('hex')}`;
+  const sig = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex');
+  return { question: `Quanto é ${a} ${op.sym} ${b}?`, token: `${payload}.${sig}` };
+}
+
+function verifyCaptcha(token, answer) {
+  if (typeof token !== 'string' || typeof answer !== 'string') return false;
+  const parts = token.split('.');
+  if (parts.length !== 4) return false;
+  const [val, exp, nonce, sig] = parts;
+  const payload = `${val}.${exp}.${nonce}`;
+  const expected = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex');
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  if (Date.now() > Number(exp)) return false;
+  if (usedCaptchas.has(token)) return false;
+  if (answer.trim() !== val) return false;
+  pruneUsedCaptchas();
+  usedCaptchas.set(token, Number(exp));
+  return true;
+}
+
+const captchaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas requisições. Aguarde um pouco.' },
+});
+
 function signToken(userId) {
   return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
@@ -93,7 +141,14 @@ export function requireAuth(req, res, next) {
 }
 
 export function registerAuthRoutes(app) {
+  app.get('/api/auth/captcha', captchaLimiter, (req, res) => {
+    res.json(generateCaptcha());
+  });
+
   app.post('/api/auth/register', registerLimiter, async (req, res) => {
+    if (!verifyCaptcha(req.body?.captcha_token, req.body?.captcha_answer)) {
+      return res.status(400).json({ error: 'Captcha incorreto ou expirado. Tente novamente.', captcha: true });
+    }
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -112,6 +167,9 @@ export function registerAuthRoutes(app) {
   });
 
   app.post('/api/auth/login', loginLimiter, loginAccountLimiter, async (req, res) => {
+    if (!verifyCaptcha(req.body?.captcha_token, req.body?.captcha_answer)) {
+      return res.status(400).json({ error: 'Captcha incorreto ou expirado. Tente novamente.', captcha: true });
+    }
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Email e senha obrigatórios' });
     const { email, password } = parsed.data;
