@@ -39,7 +39,9 @@ const goalSchema = z.object({
   title: z.string().min(1).max(80),
   target_amount: z.number().positive().max(99999999),
   emoji: z.string().max(8).optional(),
-  deadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  deadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(d => d > new Date().toISOString().slice(0, 10), 'O prazo da meta deve estar no futuro')
+    .optional().nullable(),
 });
 
 const goalContribSchema = z.object({

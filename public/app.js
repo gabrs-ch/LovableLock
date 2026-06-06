@@ -728,6 +728,10 @@ route('settings', async () => {
           $app.querySelector('#couple-msg').innerHTML = '<div class="alert">Data inválida — use dd/mm/aaaa</div>';
           return;
         }
+        if (iso > todayISO()) {
+          $app.querySelector('#couple-msg').innerHTML = '<div class="alert">A data de início não pode estar no futuro</div>';
+          return;
+        }
         data.started_at = iso;
       }
       if (!data.nickname) delete data.nickname;
@@ -1023,6 +1027,10 @@ function openGoalModal() {
       const iso = brToISO(fd.get('deadline'));
       if (!iso) {
         m.querySelector('#g-err').innerHTML = '<div class="alert">Prazo inválido — use dd/mm/aaaa</div>';
+        return;
+      }
+      if (iso <= todayISO()) {
+        m.querySelector('#g-err').innerHTML = '<div class="alert">O prazo deve estar no futuro</div>';
         return;
       }
       body.deadline = iso;

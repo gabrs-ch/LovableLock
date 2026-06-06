@@ -35,7 +35,9 @@ const joinSchema = z.object({
 
 const coupleMetaSchema = z.object({
   nickname: z.string().min(1).max(60).optional(),
-  started_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  started_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(d => d <= new Date().toISOString().slice(0, 10), 'A data de início não pode estar no futuro')
+    .optional(),
 });
 
 export function registerCoupleRoutes(app) {
@@ -104,7 +106,7 @@ export function registerCoupleRoutes(app) {
   app.patch('/api/couple/me', requireAuth, (req, res) => {
     if (!req.user.couple_id) return res.status(400).json({ error: 'Sem casal' });
     const parsed = coupleMetaSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message || 'Dados inválidos' });
     const fields = [];
     const values = [];
     if (parsed.data.nickname !== undefined) { fields.push('nickname = ?'); values.push(parsed.data.nickname); }
