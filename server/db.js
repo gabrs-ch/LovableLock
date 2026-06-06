@@ -64,6 +64,29 @@ db.exec(`
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS recurring_entries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type         TEXT NOT NULL CHECK (type IN ('credit', 'debit')),
+    description  TEXT NOT NULL,
+    amount       REAL,                       -- NULL quando is_variable = 1
+    day_of_month INTEGER NOT NULL,
+    is_variable  INTEGER NOT NULL DEFAULT 0,
+    last_applied TEXT,                       -- YYYY-MM da última ocorrência processada
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS recurring_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recurring_id INTEGER NOT NULL REFERENCES recurring_entries(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type         TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    amount       REAL NOT NULL,
+    occurred_on  TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS settlements (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     couple_id   INTEGER NOT NULL REFERENCES couples(id) ON DELETE CASCADE,

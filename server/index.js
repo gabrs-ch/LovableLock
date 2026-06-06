@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { registerAuthRoutes } from './auth.js';
 import { registerCoupleRoutes } from './couple.js';
 import { registerFinanceRoutes } from './finance.js';
+import { registerRecurringRoutes } from './recurring.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,6 +66,7 @@ app.use('/api', rateLimit({
 registerAuthRoutes(app);
 registerCoupleRoutes(app);
 registerFinanceRoutes(app);
+registerRecurringRoutes(app);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, app: 'LovableLock' }));
 

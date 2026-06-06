@@ -88,11 +88,72 @@ window.addEventListener('hashchange', () => navigate());
       state.couple = c.couple; state.partner = c.partner;
     }
     navigate(location.hash || (state.user.couple_id ? '#/dash' : '#/pair'));
+    processRecurring();
   } catch {
     state.user = null;
     renderAuth();
   }
 })();
+
+// ─── recorrências: aplica fixas vencidas e pergunta valor das variáveis ───
+async function processRecurring() {
+  let result;
+  try {
+    result = await api('/api/recurring/process', { method: 'POST' });
+  } catch { return; }
+
+  if (result.applied.length) {
+    const lines = result.applied.map(a =>
+      `<div class="row" style="padding:6px 0;">
+        <span>${a.type === 'credit' ? '↑' : '↓'} ${esc(a.description)}</span>
+        <span style="margin-left:auto;">${fmtDateBR(a.occurred_on)} · <b>${a.type === 'credit' ? '+' : '−'}${BRL(a.amount)}</b></span>
+      </div>`).join('');
+    const m = openModal(`
+      <h2>Lançamentos <em class="display">automáticos</em></h2>
+      <p class="muted">Aplicados no seu caixa desde o último acesso:</p>
+      <div style="margin:14px 0;">${lines}</div>
+      <div class="actions"><button class="btn" data-close>ok</button></div>
+    `);
+    m.querySelector('[data-close]').addEventListener('click', () => m.remove());
+  }
+
+  for (const p of result.pending) {
+    await askVariableAmount(p);
+  }
+  if (result.applied.length || result.pending.length) navigate();
+}
+
+function askVariableAmount(p) {
+  return new Promise((resolve) => {
+    const isCredit = p.type === 'credit';
+    const m = openModal(`
+      <h2>${isCredit ? 'Crédito' : 'Conta'} <em class="display">do período</em></h2>
+      <p class="muted">"${esc(p.description)}" venceu em ${fmtDateBR(p.occurred_on)}. Qual o valor?</p>
+      <form id="var-form">
+        <div class="field">
+          <label>Valor (R$)</label>
+          <input type="number" step="0.01" min="0.01" name="amount" required autofocus />
+        </div>
+        <div id="var-err"></div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" data-skip>deixar pra depois</button>
+          <button class="btn">${isCredit ? 'receber' : 'pagar'}</button>
+        </div>
+      </form>
+    `);
+    m.querySelector('[data-skip]').addEventListener('click', () => { m.remove(); resolve(); });
+    m.querySelector('#var-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const amount = parseFloat(new FormData(e.target).get('amount'));
+      try {
+        await api(`/api/recurring/${p.id}/confirm`, { method: 'POST', body: { amount } });
+        m.remove(); resolve();
+      } catch (err) {
+        m.querySelector('#var-err').innerHTML = `<div class="alert">${esc(err.message)}</div>`;
+      }
+    });
+  });
+}
 
 // ─── shell (topbar + footer) ───────────────────────
 function shell(inner, active) {
@@ -159,6 +220,23 @@ function renderAuth(initialTab = 'login', message = null) {
   initialTab === 'register' ? renderRegister() : renderLogin();
 }
 
+// ─── captcha: busca desafio e injeta campo no form ───
+async function mountCaptcha(form) {
+  const slot = form.querySelector('.captcha-slot');
+  slot.innerHTML = '<div class="field"><label>Verificação</label><span class="muted">carregando…</span></div>';
+  try {
+    const c = await api('/api/auth/captcha');
+    slot.innerHTML = `
+      <div class="field">
+        <label>Verificação: ${esc(c.question)}</label>
+        <input name="captcha_answer" inputmode="numeric" autocomplete="off" required placeholder="resposta" />
+        <input type="hidden" name="captcha_token" value="${esc(c.token)}" />
+      </div>`;
+  } catch {
+    slot.innerHTML = '<div class="alert">Não foi possível carregar a verificação. Recarregue a página.</div>';
+  }
+}
+
 function renderLogin() {
   const pane = $app.querySelector('#auth-pane');
   pane.innerHTML = `
@@ -173,11 +251,14 @@ function renderLogin() {
         <label>Senha</label>
         <input type="password" name="password" required autocomplete="current-password" />
       </div>
+      <div class="captcha-slot"></div>
       <div id="login-err"></div>
       <button class="btn">Entrar</button>
     </form>
   `;
-  pane.querySelector('#login-form').addEventListener('submit', async (e) => {
+  const form = pane.querySelector('#login-form');
+  mountCaptcha(form);
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
     try {
@@ -190,8 +271,10 @@ function renderLogin() {
         location.hash = '#/pair';
       }
       navigate();
+      processRecurring();
     } catch (err) {
       pane.querySelector('#login-err').innerHTML = `<div class="alert">${esc(err.message)}</div>`;
+      mountCaptcha(form);
     }
   });
 }
@@ -221,6 +304,10 @@ function renderRegister() {
         <input type="email" name="email" required autocomplete="email" />
       </div>
       <div class="field">
+        <label>Confirme o email</label>
+        <input type="email" name="email2" id="email2" required autocomplete="off" placeholder="digite novamente" />
+      </div>
+      <div class="field">
         <label>Senha</label>
         <input type="password" name="password" id="pw" required autocomplete="new-password" />
         <div class="meter" data-score="0"><span></span><span></span><span></span><span></span><span></span></div>
@@ -232,10 +319,18 @@ function renderRegister() {
           <li data-k="special">1 especial</li>
         </ul>
       </div>
+      <div class="captcha-slot"></div>
       <div id="reg-err"></div>
       <button class="btn">Criar conta</button>
     </form>
   `;
+  const regForm = pane.querySelector('#register-form');
+  mountCaptcha(regForm);
+
+  const email2 = pane.querySelector('#email2');
+  ['paste', 'copy', 'cut', 'drop'].forEach(ev => email2.addEventListener(ev, e => e.preventDefault()));
+  email2.addEventListener('contextmenu', e => e.preventDefault());
+
   const pwInput = pane.querySelector('#pw');
   pwInput.addEventListener('input', () => {
     const c = passwordChecks(pwInput.value);
@@ -247,15 +342,21 @@ function renderRegister() {
     });
   });
 
-  pane.querySelector('#register-form').addEventListener('submit', async (e) => {
+  regForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
+    if (data.email.trim().toLowerCase() !== data.email2.trim().toLowerCase()) {
+      pane.querySelector('#reg-err').innerHTML = '<div class="alert">Os emails não conferem. Verifique o preenchimento.</div>';
+      return;
+    }
+    delete data.email2;
     try {
       state.user = await api('/api/auth/register', { method: 'POST', body: data });
       location.hash = '#/pair';
       navigate();
     } catch (err) {
       pane.querySelector('#reg-err').innerHTML = `<div class="alert">${esc(err.message)}</div>`;
+      mountCaptcha(regForm);
     }
   });
 }
@@ -389,7 +490,7 @@ route('dash', async () => {
     <div class="split-row" style="margin-bottom: 32px;">
       <div>
         <h1>${esc(d.couple.nickname || `${state.user.name} & ${d.partner.name}`)}</h1>
-        ${d.couple.started_at ? `<p class="muted">juntos desde ${fmtDateBR(d.couple.started_at)}${timeTogether(d.couple.started_at) ? ` · ${timeTogether(d.couple.started_at)} a dois` : ''}</p>` : ''}
+        ${d.couple.started_at ? `<p class="muted" style="margin-top:14px;">juntos desde ${fmtDateBR(d.couple.started_at)}${timeTogether(d.couple.started_at) ? ` · ${timeTogether(d.couple.started_at)} a dois` : ''}</p>` : ''}
         <p class="muted">${d.month.year_month} · um mês a dois</p>
       </div>
     </div>
@@ -549,7 +650,27 @@ route('goals', async () => {
 // ──────────────────────────────────────────────────
 route('settings', async () => {
   if (!state.user) return renderAuth();
-  const me = await api('/api/auth/me');
+  const [me, recurring] = await Promise.all([
+    api('/api/auth/me'),
+    api('/api/recurring'),
+  ]);
+
+  const recurringRows = recurring.length ? recurring.map(r => `
+    <div class="row" style="align-items:center; padding:8px 0;">
+      <span>${r.type === 'credit' ? '↑' : '↓'}</span>
+      <div class="desc">${esc(r.description)}<small>todo dia ${r.day_of_month} · ${r.is_variable ? 'valor variável' : BRL(r.amount)}</small></div>
+      <button class="btn btn-sm btn-ghost" data-del-rec="${r.id}" style="margin-left:auto;">remover</button>
+    </div>`).join('') : '<div class="empty">Nenhuma recorrência cadastrada.</div>';
+
+  const recurringBlock = `
+    <div class="chapter"><span class="num">§.</span><span class="line"></span><span class="label">Recorrências</span></div>
+    <div style="max-width:520px; margin-bottom: 40px;">
+      <p class="muted" style="margin-bottom:12px;">Créditos e contas que se repetem todo mês — aplicados automaticamente no seu caixa.</p>
+      ${recurringRows}
+      <button class="btn" id="new-recurring" style="margin-top:14px;">+ nova recorrência</button>
+    </div>
+  `;
+
   let coupleBlock = '';
   if (me.couple_id) {
     const c = await api('/api/couple/me');
@@ -583,10 +704,17 @@ route('settings', async () => {
       <div><strong>Email:</strong> ${esc(me.email)}</div>
       <div><strong>Caixa atual:</strong> ${BRL(me.cash_balance)} <button class="btn btn-sm btn-ghost" id="edit-balance" style="margin-left:10px;">ajustar</button></div>
     </div>
+    ${recurringBlock}
     ${coupleBlock}
   `, 'settings');
 
   $app.querySelector('#edit-balance').addEventListener('click', () => openBalanceModal(me.cash_balance));
+  $app.querySelector('#new-recurring').addEventListener('click', openRecurringModal);
+  $app.querySelectorAll('[data-del-rec]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Remover esta recorrência? Os lançamentos já aplicados não serão desfeitos.')) return;
+    await api(`/api/recurring/${b.dataset.delRec}`, { method: 'DELETE' });
+    navigate();
+  }));
   const cf = $app.querySelector('#couple-form');
   if (cf) {
     maskDateBR(cf.querySelector('[name="started_at"]'));
@@ -785,6 +913,69 @@ function openSettleModal(netToMe, partner) {
       m.remove(); navigate();
     } catch (err) {
       m.querySelector('#set-err').innerHTML = `<div class="alert">${esc(err.message)}</div>`;
+    }
+  });
+}
+
+function openRecurringModal() {
+  const m = openModal(`
+    <h2>Nova <em class="display">recorrência</em></h2>
+    <form id="rec-form">
+      <div class="field">
+        <label>Tipo</label>
+        <select name="type">
+          <option value="credit">Crédito — entra no meu caixa</option>
+          <option value="debit">Dívida — desconta do meu caixa</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Descrição</label>
+        <input name="description" required maxlength="120" placeholder="Salário, faculdade, aluguel…" />
+      </div>
+      <div class="field">
+        <label>Dia do mês</label>
+        <input type="number" name="day_of_month" min="1" max="31" required placeholder="5" />
+      </div>
+      <div class="field">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" name="is_variable" id="rec-var" style="width:auto;" />
+          Valor variável (o sistema pergunta o valor a cada mês)
+        </label>
+      </div>
+      <div class="field" id="rec-amount-field">
+        <label>Valor (R$)</label>
+        <input type="number" step="0.01" min="0.01" name="amount" required placeholder="1600,00" />
+      </div>
+      <div id="rec-err"></div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" data-close>cancelar</button>
+        <button class="btn">criar</button>
+      </div>
+    </form>
+  `);
+  const amountField = m.querySelector('#rec-amount-field');
+  const amountInput = amountField.querySelector('input');
+  m.querySelector('#rec-var').addEventListener('change', (e) => {
+    amountField.style.display = e.target.checked ? 'none' : '';
+    amountInput.required = !e.target.checked;
+  });
+  m.querySelector('[data-close]').addEventListener('click', () => m.remove());
+  m.querySelector('#rec-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const isVariable = fd.get('is_variable') === 'on';
+    const body = {
+      type: fd.get('type'),
+      description: fd.get('description'),
+      day_of_month: parseInt(fd.get('day_of_month'), 10),
+      is_variable: isVariable,
+    };
+    if (!isVariable) body.amount = parseFloat(fd.get('amount'));
+    try {
+      await api('/api/recurring', { method: 'POST', body });
+      m.remove(); navigate();
+    } catch (err) {
+      m.querySelector('#rec-err').innerHTML = `<div class="alert">${esc(err.message)}</div>`;
     }
   });
 }
